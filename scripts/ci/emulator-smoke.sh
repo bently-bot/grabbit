@@ -31,6 +31,22 @@ tap_text() {
   set -- $b
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
+# uiautomator can't dump while an indeterminate spinner animates, so check the focused
+# window for "is the sheet up" and treat a failed dump as "still loading".
+focused() { adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -2; }
+wait_focus() { # activity-substring timeout
+  local t=0
+  until focused | grep -q "$1"; do sleep 2; t=$((t + 2)); [ $t -ge "$2" ] && return 1; done
+}
+wait_loaded() { # timeout: wait until a dump succeeds and shows no "Fetching info"
+  local t=0 x
+  while [ $t -lt "$1" ]; do
+    x=$(ui)
+    if echo "$x" | grep -q 'text="Download' && ! echo "$x" | grep -q 'Fetching info'; then return 0; fi
+    sleep 3; t=$((t + 3))
+  done
+  return 1
+}
 wait_text() { # text timeout
   local t=0
   until has_text "$1"; do sleep 2; t=$((t + 2)); [ $t -ge "$2" ] && return 1; done
@@ -71,18 +87,20 @@ adb shell am start -W -a android.intent.action.SEND -t text/plain \
   --es android.intent.extra.TEXT "'$TEXT'" \
   --es android.intent.extra.SUBJECT "'Shared video'" \
   -n $PKG/.ui.share.ShareActivity
-if wait_text "Open in Grabbit" 30; then
+if wait_focus ShareActivity 30; then
+  echo "share sheet is up: $(focused | head -1)"
+  sleep 3
   shot 02-share-sheet-loading
   # Give yt-dlp time to fetch the preview (first run also unpacks Python).
-  t=0; until ! has_text "Fetching info…" || [ $t -ge 90 ]; do sleep 3; t=$((t + 3)); done
+  wait_loaded 120 && echo "share preview finished loading" || echo "WARN: share preview still loading after 120s"
   sleep 2
   shot 02-share-sheet
   ui > "$OUT/02-share-sheet-ui.xml"
-  adb shell dumpsys activity activities | grep -E 'topResumedActivity|ResumedActivity' | head -3
-  tap_text "Download" || tap_text "Download now" || fail=1
-  sleep 3
-  adb shell dumpsys activity activities | grep -q "topResumedActivity.*ShareActivity" \
-    && { echo "share sheet did not close after Download"; fail=1; } || echo "sheet closed after Download"
+  tap_text "Download" || tap_text "Download now" || { echo "ERROR: could not tap Download in sheet"; fail=1; }
+  sleep 4
+  focused | grep -q ShareActivity \
+    && { echo "ERROR: share sheet did not close after Download"; fail=1; } || echo "sheet closed after Download"
+  shot 02-after-share-download
   echo "share-sheet item status: $(status_of "$SHARE_URL")"
 else
   echo "ERROR: share sheet did not appear"; shot 02-share-sheet-missing; fail=1
@@ -90,7 +108,7 @@ fi
 
 log "3. main screen direct download"
 adb shell am start -W -n $PKG/.ui.main.MainActivity --es com.bentlybro.grabbit.URL "$DIRECT_URL" -f 0x24000000
-t=0; until { has_text "Download" && ! has_text "Fetching info…"; } || [ $t -ge 90 ]; do sleep 3; t=$((t + 3)); done
+wait_loaded 120 || echo "WARN: main preview still loading"
 sleep 2
 shot 03-preview
 tap_text "Download" || tap_text "Download (fetching info…)" || { echo "no Download button"; fail=1; }
@@ -114,8 +132,8 @@ shot 06-done
 [ $saw_progress -eq 1 ] || echo "WARN: never observed RUNNING state (download too fast?)"
 
 log "MediaStore check"
-adb shell content query --uri content://media/external/video/media \
-  --projection _display_name:relative_path:_size --where "relative_path LIKE 'Movies/Grabbit%'" | tee "$OUT/mediastore.txt"
+adb shell "content query --uri content://media/external/video/media --projection _display_name:relative_path:_size" \
+  | grep "Grabbit" | tee "$OUT/mediastore.txt"
 grep -q "Grabbit" "$OUT/mediastore.txt" || { echo "ERROR: nothing in Movies/Grabbit"; fail=1; }
 
 log "share-sheet (real site) download result"

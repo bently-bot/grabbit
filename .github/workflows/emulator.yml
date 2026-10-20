@@ -67,7 +67,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ env.API_LEVEL }}-${{ env.TARGET }}-${{ env.ARCH }}
+          key: avd-${{ env.API_LEVEL }}-${{ env.TARGET }}-${{ env.ARCH }}-pixel6-v2
 
       - name: Create AVD snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -78,6 +78,7 @@ jobs:
           arch: ${{ env.ARCH }}
           force-avd-creation: false
           cores: 4
+          profile: pixel_6
           ram-size: 3072M
           disk-size: 4096M
           emulator-boot-timeout: 360
@@ -92,6 +93,11 @@ jobs:
           target: ${{ env.TARGET }}
           arch: ${{ env.ARCH }}
           force-avd-creation: false
+          cores: 4
+          profile: pixel_6
+          ram-size: 3072M
+          disk-size: 4096M
+          emulator-boot-timeout: 360
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: OUT=screenshots bash scripts/ci/emulator-smoke.sh
