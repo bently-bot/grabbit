@@ -12,7 +12,7 @@
 | `SharedTextTest` | priority between EXTRA_TEXT, data URI, ClipData and EXTRA_SUBJECT |
 | `FormatSelectorTest` | the yt-dlp arguments for every format, fallbacks, MP3 extraction |
 | `ProgressAndMediaTest` | yt-dlp line to phase, % and ETA clamping, durations, MediaStore folder and MIME mapping, filename sanitising |
-| `QueueReducerTest` | queue state machine: lifecycle, cancel/fail/progress races, retry, clear, restart reconciliation, error messages |
+| `QueueReducerTest` | queue state machine: lifecycle, cancel/fail/progress races, retry, clear, restart reconciliation, friendly error messages (YouTube bot check, 429, unsupported URL…) |
 | `StatusTextTest` | the status line each queue row shows |
 
 ## Emulator smoke test (GitHub Actions)
@@ -30,7 +30,7 @@ runs `scripts/ci/emulator-smoke.sh`, which:
 
 Screenshots, `queue.json`, the MediaStore listing and logcat are uploaded as the
 `emulator-smoke-<sha>` artifact. Whether the real-site download from step 2 succeeds is
-logged but doesn't fail the job, because sites like YouTube often block datacenter IPs.
+logged but doesn't fail the job. GitHub runners use datacenter IPs, and YouTube always answers those with a "Sign in to confirm you're not a bot" check, which the app shows as *"YouTube blocked this request…"*.
 
 ## On a phone
 
