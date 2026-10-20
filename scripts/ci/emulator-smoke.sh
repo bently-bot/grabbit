@@ -68,7 +68,10 @@ print(json.dumps(m[0], indent=1) if m else '{}')" "$1" 2>/dev/null
 fail=0
 
 log "install"
-adb install -r -g "$APK" || exit 1
+# Fresh install every time: a cached AVD can hold a build signed by another runner's
+# throwaway debug key (INSTALL_FAILED_UPDATE_INCOMPATIBLE), and we want first-run state.
+adb uninstall $PKG >/dev/null 2>&1 || true
+adb install -g "$APK" || exit 1
 adb shell settings put global hide_error_dialogs 1 || true
 adb logcat -c || true
 
