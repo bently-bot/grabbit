@@ -109,8 +109,24 @@ object QueueReducer {
 
 /** Short, human error message from a yt-dlp stderr dump. */
 object ErrorText {
+    const val YOUTUBE_BOT_CHECK =
+        "YouTube blocked this request. Try again later, or update yt-dlp in Settings."
+
+    /** Well-known failures mapped to plain English; checked before the generic cleanup. */
+    private val friendly = listOf(
+        Regex("(?i)confirm you.?re not a bot|sign in to confirm your age") to YOUTUBE_BOT_CHECK,
+        Regex("(?i)unsupported url") to "This site isn't supported.",
+        Regex("(?i)private video") to "This video is private.",
+        Regex("(?i)video unavailable|has been removed|no longer available") to "Video unavailable.",
+        Regex("(?i)http error 429|too many requests") to "Too many requests. Wait a bit and try again.",
+        Regex("(?i)unable to download webpage|failed to resolve|network is unreachable|timed out") to
+            "Couldn't reach the site. Check your connection.",
+        Regex("(?i)login required|requires authentication|log in to") to "This post needs a login to view.",
+    )
+
     fun from(raw: String?): String {
         if (raw.isNullOrBlank()) return "Download failed"
+        friendly.firstOrNull { it.first.containsMatchIn(raw) }?.let { return it.second }
         val lines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val err = lines.lastOrNull { it.startsWith("ERROR:") } ?: lines.lastOrNull() ?: return "Download failed"
         return err.removePrefix("ERROR:").trim()

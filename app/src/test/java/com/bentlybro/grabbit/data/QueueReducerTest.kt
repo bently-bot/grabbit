@@ -94,13 +94,20 @@ class QueueReducerTest {
     @Test fun errorText() {
         assertEquals("Download failed", ErrorText.from(null))
         assertEquals(
-            "Unsupported URL: https://example.com",
+            "This site isn't supported.",
             ErrorText.from("WARNING: something\nERROR: Unsupported URL: https://example.com\n"),
         )
+        assertEquals("Video unavailable.", ErrorText.from("ERROR: [youtube] abc: Video unavailable"))
         assertEquals(
-            "Video unavailable",
-            ErrorText.from("ERROR: [youtube] abc: Video unavailable"),
+            ErrorText.YOUTUBE_BOT_CHECK,
+            ErrorText.from(
+                "ERROR: [youtube] jNQXAC9IVRw: Sign in to confirm you\u2019re not a bot. Use --cookies-from-browser " +
+                    "or --cookies for the authentication."
+            ),
         )
+        assertEquals("Too many requests. Wait a bit and try again.", ErrorText.from("ERROR: HTTP Error 429: Too Many Requests"))
+        // Unknown errors still get the generic cleanup.
+        assertEquals("Something odd happened", ErrorText.from("ERROR: [generic] x: Something odd happened"))
     }
 
     @Test fun displayTitleFallsBackToUrl() {

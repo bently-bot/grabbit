@@ -142,7 +142,7 @@ for i in $(seq 1 60); do
   [ "$s2" = "DONE" ] || [ "$s2" = "FAILED" ] && break
   sleep 3
 done
-echo "share download final status: $s2 (informational)"
+echo "share download final status: $s2 (informational only: YouTube bot-checks datacenter IPs, never fails the job)"
 detail_of "$SHARE_URL"
 shot 07-final
 
