@@ -85,7 +85,14 @@ On first launch Grabbit unpacks its bundled Python and yt-dlp, which takes a few
 ## 🤖 CI and releases
 
 - **CI** runs on every push and PR. It does `assembleDebug`, `lint` and `testDebugUnitTest`, then uploads the debug APKs as artifacts.
+- **Emulator smoke test** (`emulator.yml`) boots a KVM-accelerated API 34 emulator on GitHub Actions. It launches the app, fires a messy TikTok-style share intent at the share sheet, and runs a real download into `Movies/Grabbit`. Screenshots and logcat are uploaded. See [docs/03-testing.md](docs/03-testing.md).
 - **Releases**: pushing a `v*` tag builds the APKs and creates a **draft** GitHub release with them attached. Nothing goes public until it's published by hand.
+
+## 📚 Docs
+
+- [01 · Architecture](docs/01-architecture.md): packages, data flow, download engine, storage, APK size
+- [02 · The share flow](docs/02-share-flow.md): ShareActivity, instant mode, finding the link in messy share text
+- [03 · Testing](docs/03-testing.md): unit tests and the emulator smoke test
 
 ## ⚖️ Use responsibly
 
