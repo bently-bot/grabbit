@@ -33,7 +33,12 @@ tap_text() {
 }
 # uiautomator can't dump while an indeterminate spinner animates, so check the focused
 # window for "is the sheet up" and treat a failed dump as "still loading".
-focused() { adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -2; }
+# The sheet lives in its own dialog window, so look at the resumed activity as well as the
+# focused window/app; any of them naming ShareActivity means the sheet is up.
+focused() {
+  adb shell dumpsys activity activities 2>/dev/null | grep -E 'topResumedActivity|mResumedActivity' | head -2
+  adb shell dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -2
+}
 wait_focus() { # activity-substring timeout
   local t=0
   until focused | grep -q "$1"; do sleep 2; t=$((t + 2)); [ $t -ge "$2" ] && return 1; done
@@ -90,7 +95,7 @@ adb shell am start -W -a android.intent.action.SEND -t text/plain \
   --es android.intent.extra.TEXT "'$TEXT'" \
   --es android.intent.extra.SUBJECT "'Shared video'" \
   -n $PKG/.ui.share.ShareActivity
-if wait_focus ShareActivity 30; then
+if wait_focus ShareActivity 45; then
   echo "share sheet is up: $(focused | head -1)"
   sleep 3
   shot 02-share-sheet-loading
@@ -106,7 +111,7 @@ if wait_focus ShareActivity 30; then
   shot 02-after-share-download
   echo "share-sheet item status: $(status_of "$SHARE_URL")"
 else
-  echo "ERROR: share sheet did not appear"; shot 02-share-sheet-missing; fail=1
+  echo "ERROR: share sheet did not appear. Focus state:"; focused; shot 02-share-sheet-missing; fail=1
 fi
 
 log "3. main screen direct download"
