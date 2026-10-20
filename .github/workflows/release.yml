@@ -1,0 +1,86 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the APKs and open a DRAFT release with them attached.
+# Nothing is public until the draft is published by hand.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # to create the draft release
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Check the tag matches the app version
+        id: version
+        run: |
+          name=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$name" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match appVersionName $name in app/build.gradle.kts"
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      # Signed release APKs when the signing secrets exist; otherwise debug-signed APKs so
+      # a draft can still be produced (and installed) before a release key is set up.
+      - name: Build APKs
+        id: build
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            export KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
+            ./gradlew assembleRelease -PversionCode=${{ github.run_number }} --no-daemon
+            variant=release
+          else
+            echo "::warning::No signing secrets; attaching debug-signed APKs."
+            ./gradlew assembleDebug -PversionCode=${{ github.run_number }} --no-daemon
+            variant=debug
+          fi
+          for apk in app/build/outputs/apk/$variant/*.apk; do
+            abi=$(basename "$apk" | sed -E "s/app-(.*)-$variant\.apk/\1/")
+            cp "$apk" "dist/grabbit-${{ steps.version.outputs.name }}-$abi.apk"
+          done
+          ls -l dist
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Draft the release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          name: Grabbit ${{ steps.version.outputs.name }}
+          files: dist/*.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true

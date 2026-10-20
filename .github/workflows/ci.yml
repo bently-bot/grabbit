@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: Assemble debug
+        run: ./gradlew assembleDebug -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
+
+      - name: Lint
+        run: ./gradlew lintDebug --no-daemon
+
+      - name: Unit tests
+        id: unit-tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      # Gradle reports NO-SOURCE as success; make sure tests really ran.
+      - name: Check the unit tests actually ran
+        run: |
+          results=app/build/test-results/testDebugUnitTest
+          count=0
+          if ls "$results"/*.xml >/dev/null 2>&1; then
+            count=$(awk 'match($0, /tests="[0-9]+"/) {
+                total += substr($0, RSTART + 7, RLENGTH - 8)
+              } END { print total + 0 }' "$results"/*.xml)
+          fi
+          echo "Unit tests run: $count" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::testDebugUnitTest succeeded without running a single test."
+            exit 1
+          fi
+
+      - name: APK sizes
+        run: |
+          echo "### Debug APKs" >> "$GITHUB_STEP_SUMMARY"
+          ls -l app/build/outputs/apk/debug/*.apk | awk '{printf "- `%s`: %.1f MB\n", $9, $5/1048576}' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unit test report
+        if: failure() && steps.unit-tests.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-report-${{ github.sha }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
+          retention-days: 14
+
+      # Debug builds use Android's throwaway debug key, so these are safe to publish.
+      - name: Upload debug APKs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: grabbit-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lint-report-${{ github.sha }}
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 14
