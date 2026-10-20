@@ -1,0 +1,7 @@
+<resources>
+    <color name="ink">#FF0D0F14</color>
+    <color name="carrot">#FFFF8A3D</color>
+    <color name="carrot_deep">#FFFF5E62</color>
+    <color name="icon_bg_start">#FF1D212C</color>
+    <color name="icon_bg_end">#FF0D0F14</color>
+</resources>
