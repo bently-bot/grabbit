@@ -22,7 +22,10 @@ mkdir -p "$OUT"
 log() { echo "::group::$*" 2>/dev/null; echo "== $*"; echo "::endgroup::" 2>/dev/null; }
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; echo "screenshot $OUT/$1.png"; }
 ui() { adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; adb exec-out cat /sdcard/ui.xml 2>/dev/null; }
-has_text() { ui | grep -q "text=\"$1\""; }
+# Note: never `producer | grep -q` here. With pipefail, grep -q exiting early SIGPIPEs the
+# producer and the pipeline reports failure even on a match. Capture first, then test.
+has_text() { local x; x=$(ui); grep -q "text=\"$1\"" <<<"$x"; }
+is_focused() { local x; x=$(focused); grep -q "$1" <<<"$x"; }
 # Tap the centre of the first node whose text matches exactly.
 tap_text() {
   local b
@@ -41,13 +44,13 @@ focused() {
 }
 wait_focus() { # activity-substring timeout
   local t=0
-  until focused | grep -q "$1"; do sleep 2; t=$((t + 2)); [ $t -ge "$2" ] && return 1; done
+  until is_focused "$1"; do sleep 2; t=$((t + 2)); [ $t -ge "$2" ] && return 1; done
 }
 wait_loaded() { # timeout: wait until a dump succeeds and shows no "Fetching info"
   local t=0 x
   while [ $t -lt "$1" ]; do
     x=$(ui)
-    if echo "$x" | grep -q 'text="Download' && ! echo "$x" | grep -q 'Fetching info'; then return 0; fi
+    if grep -q 'text="Download' <<<"$x" && ! grep -q 'Fetching info' <<<"$x"; then return 0; fi
     sleep 3; t=$((t + 3))
   done
   return 1
@@ -106,7 +109,7 @@ if wait_focus ShareActivity 45; then
   ui > "$OUT/02-share-sheet-ui.xml"
   tap_text "Download" || tap_text "Download now" || { echo "ERROR: could not tap Download in sheet"; fail=1; }
   sleep 4
-  focused | grep -q ShareActivity \
+  is_focused ShareActivity \
     && { echo "ERROR: share sheet did not close after Download"; fail=1; } || echo "sheet closed after Download"
   shot 02-after-share-download
   echo "share-sheet item status: $(status_of "$SHARE_URL")"
