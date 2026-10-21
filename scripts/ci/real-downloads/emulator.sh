@@ -15,8 +15,10 @@ RECEIVER="$PKG/.debug.DebugCommandReceiver"
 mkdir -p "$OUT/files"
 
 say() { echo "== $*"; }
-cmd() { adb shell am broadcast -n "$RECEIVER" -a "com.bentlybro.grabbit.debug.$1" "${@:2}" >/dev/null; }
-appfile() { adb exec-out run-as "$PKG" cat "files/$1" 2>/dev/null; }
+# </dev/null: adb shell otherwise swallows the stdin of the `while read` loop below, and only
+# the first URL ever gets queued.
+cmd() { adb shell am broadcast -n "$RECEIVER" -a "com.bentlybro.grabbit.debug.$1" "${@:2}" >/dev/null </dev/null; }
+appfile() { adb exec-out run-as "$PKG" cat "files/$1" 2>/dev/null </dev/null; }
 
 say "install"
 adb uninstall "$PKG" >/dev/null 2>&1 || true
@@ -40,11 +42,12 @@ ENGINE=$(appfile debug/engine.txt | sed -n 's/^version=//p')
 echo "bundled=$BUNDLED updated=$ENGINE"
 
 say "enqueue"
-grep -v '^#' "$HERE/urls.tsv" | while IFS=$'\t' read -r platform url _; do
+while IFS=$'\t' read -r platform url _; do
+  case "$platform" in \#*) continue ;; esac
   [ -z "$platform" ] && continue
   cmd ENQUEUE --es url "$url" --es tag "$platform" --es format "$FORMAT"
   sleep 1
-done
+done < "$HERE/urls.tsv"
 
 say "wait (up to ${TIMEOUT}s)"
 start=$(date +%s)
