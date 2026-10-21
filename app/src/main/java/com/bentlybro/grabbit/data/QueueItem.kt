@@ -150,6 +150,10 @@ object ErrorText {
 
     fun from(raw: String?): String {
         if (raw.isNullOrBlank()) return "Download failed"
+        // The final ERROR line is the real cause; earlier lines can be retried warnings
+        // (e.g. a 403 on one client before a login wall), so match it first.
+        val last = lastErrorLine(raw)
+        if (last != null) friendly.firstOrNull { it.first.containsMatchIn(last) }?.let { return it.second }
         friendly.firstOrNull { it.first.containsMatchIn(raw) }?.let { return it.second }
         val lines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val err = lines.lastOrNull { it.startsWith("ERROR:") } ?: lines.lastOrNull() ?: return "Download failed"

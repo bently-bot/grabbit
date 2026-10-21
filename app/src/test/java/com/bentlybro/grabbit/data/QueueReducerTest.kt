@@ -126,6 +126,12 @@ class QueueReducerTest {
         )
     }
 
+    @Test fun finalErrorLineBeatsEarlierWarnings() {
+        // What the Reddit run on the CI emulator produced.
+        val raw = "WARNING: [Reddit] HTTP Error 403: Forbidden\nERROR: [Reddit] 6rrwyj: Account authentication is required."
+        assertEquals("This site needs a login to download that.", ErrorText.from(raw))
+    }
+
     @Test fun failedKeepsRawDetail() {
         val q = QueueReducer.failed(QueueReducer.started(listOf(item("a")), "a"), "a", "nice", "ERROR: raw")
         assertEquals("ERROR: raw", q.single().errorDetail)

@@ -85,9 +85,9 @@ for platform, url in url_of.items():
     if st == "DONE":
         uri = item.get("outputUri", "")
         m = re.search(r"/(\d+)$", uri)
-        row = sh("content", "query", "--uri", uri, "--projection", "_data:_size")
-        path = re.search(r"_data=([^,]+?)(?:, _size=|$)", row)
-        size = re.search(r"_size=(\d+)", row)
+        # One column per query: titles contain commas, which make a multi-column row ambiguous.
+        path = re.search(r"_data=(.*)$", sh("content", "query", "--uri", uri, "--projection", "_data").strip(), re.M)
+        size = re.search(r"_size=(\d+)", sh("content", "query", "--uri", uri, "--projection", "_size"))
         size = int(size.group(1)) if size else 0
         local = os.path.join(out, "files", f"{platform}{os.path.splitext(item.get('outputName') or '.mp4')[1]}")
         ok, desc = False, "not in MediaStore"
