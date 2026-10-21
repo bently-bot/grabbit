@@ -2,7 +2,7 @@
 
 **Share a link, grab the video.** A personal Android video downloader for YouTube, TikTok, Instagram, X, Reddit and the [1,800+ other sites yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
 
-> 🧪 **Status: v0.1.0, early but working.** All the MVP features below are built. Unit tests pass, and on every push an emulator test on GitHub Actions opens the share sheet and does a real download into `Movies/Grabbit`. It hasn't been tried on a physical phone yet.
+> 🧪 **Status: v0.2.0.** v0.1.0 ran on a real phone, but YouTube downloads failed with *HTTP Error 403*. 0.2.0 fixes that: the download engine now keeps itself up to date and recovers from 403s. 0.2.0 also adds in-app updates and a CI job that does real downloads from nine sources on every change and once a day ([results](#-real-download-test-matrix)).
 
 ---
 
@@ -47,36 +47,58 @@ The test video is *Big Buck Bunny*, © Blender Foundation, licensed CC BY 3.0.
   - anything else goes to `Download/Grabbit`
 
   Tap a finished item to open it, or use the share icon to send it on.
-- **Plain-English errors**: for example, *"YouTube blocked this request. Try again later, or update yt-dlp in Settings."* instead of a raw yt-dlp stack.
-- **Settings** (saved with DataStore): default format, instant-on-share, clipboard offers, and **Update yt-dlp**, which shows the current version.
+- **Self-updating engine** (see below), with **automatic 403 recovery**.
+- **In-app updates** from GitHub Releases, verified before they're installed (see below).
+- **Plain-English errors**: for example, *"YouTube blocked this request. Try again later, or update the engine in Settings."* instead of a raw yt-dlp stack.
+- **Settings** (saved with DataStore): default format, instant-on-share, clipboard offers, the download engine (version, **Update engine now**, Nightly or Stable, auto-update) and **Check for updates**.
+- **Plays everywhere**: at each resolution H.264 is preferred over AV1 (which YouTube now serves first), so saved videos play on phones without an AV1 decoder.
 - **Dark Material 3 design** built with Jetpack Compose, with a custom adaptive icon that also has a themed-icon version.
+
+## 🔄 Engine updates (why 0.1.0 got HTTP 403)
+
+yt-dlp is what actually talks to YouTube and the other sites. youtubedl-android 0.18.1 bundles **yt-dlp 2025.11.12** in the APK, which is almost a year old. YouTube keeps changing its player clients, and it now refuses streams handed out to the outdated ones. That's the `unable to download video data: HTTP Error 403: Forbidden` in 0.1.0. yt-dlp has moved on a long way since then: `android_vr` was dropped from the default clients, `web_embedded` fallbacks were added, and the JS challenge solver (EJS) went from 0.3 to 0.8. Grabbit now keeps the engine current:
+
+- **When it updates**: on first launch, once a day in the background (WorkManager, any network), and before a download if the last check was more than 24 hours ago. Updates wait for running downloads to finish, so the engine is never swapped out mid-download.
+- **Channel**: **Nightly** by default. That's where yt-dlp ships YouTube fixes first, and it's what the maintainers tell people to use when YouTube breaks. You can switch to **Stable** in Settings, and switching installs that channel straight away.
+- **403 recovery**: when a download comes back 403, Grabbit updates the engine and retries. On YouTube it then retries once more with alternate player clients (`android,web_embedded`), which hand out plain stream URLs that don't need a PO token. If it still fails you get a friendly message telling you to update the engine and try again later.
+- **JS runtime**: YouTube now needs yt-dlp to solve JavaScript challenges. The library bundles QuickJS and passes it to yt-dlp, and yt-dlp's release zip includes the EJS solver scripts, so updating the engine is all that's needed.
+- **Settings → Download engine** shows the version and when it was last checked, plus **Update engine now**, the channel switch and an auto-update toggle.
+
+## 📦 In-app updates (OTA)
+
+- **When it checks**: on launch (at most every 12 hours, release builds only) and from **Settings → Check for updates**. It reads `GET api.github.com/repos/<repo>/releases/latest`, which never returns drafts or pre-releases.
+- **The releases repo** is a build setting: `-PupdateRepo=owner/repo`, which becomes `BuildConfig.UPDATE_REPO`. The default is `bently-bot/grabbit`. No token is embedded, so that repo's releases have to be **publicly readable**.
+- **"Newer" means** a higher version name. The `versionCode` in `update.json` breaks ties.
+- **How it installs**:
+  1. Shows the release notes. You can pick **Update**, **Later** or **Skip this version**.
+  2. Downloads the APK for the phone's ABI (`grabbit-<ver>-arm64-v8a.apk` and so on) into app cache.
+  3. **Checks its SHA-256** against the release's `SHA256SUMS`, and checks it's **signed with the same key** as the installed app.
+  4. Hands it to Android's package installer through a `FileProvider` (`REQUEST_INSTALL_PACKAGES`). The first time, Android asks you to allow "Install unknown apps" for Grabbit.
+- **Signing**: releases are signed with a permanent release key, which lives only in GitHub Actions secrets plus an offline backup, never in git. Debug and CI builds use throwaway keys, so they can't update to or from a release build.
+- **⚠️ Moving from 0.1.0**: 0.1.0 was debug-signed, so Android can't update it in place. **Uninstall it once and install 0.2.0 by hand.** Every update after that installs from inside the app.
 
 ## ⚠️ Known limits
 
-- **YouTube sometimes asks for a bot check** (*"Sign in to confirm you're not a bot"*). This happens mostly on datacenter and VPN IP addresses. It **always** happens on GitHub Actions runners, so the emulator test only reports the YouTube result and doesn't fail on it. On a normal home or mobile connection it's usually fine. If it happens on your phone, try again later or tap **Update yt-dlp**. Grabbit doesn't support cookies or logins.
-- Posts that need a login (private Instagram accounts and similar) won't work.
+- **YouTube sometimes asks for a bot check** (*"Sign in to confirm you're not a bot"*). This happens mostly on datacenter and VPN IP addresses, and often on GitHub Actions runners, so CI reports it as 🚫 blocked rather than a failure. On a normal home or mobile connection it's usually fine. If it happens on your phone, try again later. Grabbit doesn't support cookies or logins.
+- **Sites that need a login won't work.** That includes **Vimeo**: current yt-dlp needs an account for vimeo.com pages. It also includes **Reddit** from datacenter IPs, and private Instagram posts.
 - The APK is large (see below) because it bundles Python, yt-dlp, FFmpeg and QuickJS.
 
 ## 📲 Install
 
 You need **Android 10 or later** (minSdk 29).
 
-1. Get the **arm64-v8a** APK. Almost every phone from the last several years needs this one. You can download it from:
-   - the latest successful [CI run](../../actions/workflows/ci.yml): open the run, then **Artifacts → `grabbit-debug-<sha>`**, which is a zip of all three APKs
-   - a [release](../../releases), once one has been published
-   - or a local build (see below)
-2. Install it, either over USB:
-   ```sh
-   adb install -r app-arm64-v8a-debug.apk
-   ```
-   or by copying it to the phone and opening it there. You'll need to allow installs from that source.
-3. Open Grabbit once. It unpacks its bundled Python and yt-dlp, which takes a few seconds the first time, and asks for permission to show notifications so you can see download progress.
+1. From the latest [release](../../releases/latest), get **`grabbit-<version>-arm64-v8a.apk`**. Almost every phone from the last several years needs this one. `SHA256SUMS` sits next to it if you want to check the download.
+2. Open it on the phone, or install it over USB with `adb install grabbit-0.2.0-arm64-v8a.apk`. Android will ask you to allow installs from that source.
+3. Open Grabbit once. It unpacks Python and yt-dlp (a few seconds) and updates the engine in the background. It also asks for permission to show notifications so you can see download progress.
+4. Later versions arrive **in the app**. (Coming from 0.1.0? Uninstall it first, see above.)
 
-| APK (debug) | Size | For |
+| Release APK | Size | For |
 |---|---|---|
-| `app-arm64-v8a-debug.apk` | ~90 MB | almost every modern phone |
-| `app-armeabi-v7a-debug.apk` | ~83 MB | old 32-bit phones |
-| `app-x86_64-debug.apk` | ~93 MB | emulators / Chromebooks |
+| `grabbit-0.2.0-arm64-v8a.apk` | ~81 MB | almost every modern phone |
+| `grabbit-0.2.0-armeabi-v7a.apk` | ~75 MB | old 32-bit phones |
+| `grabbit-0.2.0-x86_64.apk` | ~84 MB | emulators / Chromebooks |
+
+CI also builds debug APKs on every push (**Actions → CI → Artifacts**). Those are debug-signed, so they're for testing only and can't take in-app updates.
 
 ## 🛠️ Build
 
@@ -95,7 +117,7 @@ cd grabbit
 |---|---|
 | Language / UI | Kotlin 2.4, Jetpack Compose (BOM 2026.09), Material 3 |
 | Architecture | ViewModel + StateFlow. Packages: `core` (pure logic), `data`, `engine`, `download`, `ui` |
-| Download engine | [youtubedl-android](https://github.com/yausername/youtubedl-android) **0.18.1** (bundles Python, yt-dlp, FFmpeg and QuickJS). yt-dlp can be updated from inside the app |
+| Download engine | [youtubedl-android](https://github.com/yausername/youtubedl-android) **0.18.1** (bundles Python 3.11, yt-dlp, FFmpeg and QuickJS). yt-dlp self-updates (nightly by default) |
 | Background work | WorkManager 2.12 with a foreground service (`dataSync`) |
 | Storage | MediaStore for downloaded files, DataStore for settings, a small JSON file for the queue |
 | Images | Coil 3 |
@@ -111,18 +133,42 @@ cd grabbit
   - download a public test video and check that it reaches `Movies/Grabbit`
 
   Screenshots, the queue state and logcat are uploaded as artifacts. Details are in [docs/03-testing.md](docs/03-testing.md).
+- **Real downloads** (`real-downloads.yml`) runs on app changes, on PRs and **daily**. It downloads real videos from several sites, both with yt-dlp on the runner and through the app on a KVM emulator. Each saved file is pulled out of MediaStore and checked with `ffprobe`. See the matrix below.
 - **Cutting a release**:
-  1. Set `appVersionName` in `app/build.gradle.kts`, for example `0.2.0`.
-  2. Commit, then run `git tag v0.2.0 && git push origin v0.2.0`.
-  3. `release.yml` checks that the tag matches the version, runs the tests, builds per-ABI APKs and creates a **draft** GitHub release with them attached. Review it and publish it by hand.
+  1. Set `appVersionName` in `app/build.gradle.kts`, for example `0.3.0`. The `versionCode` is derived from it (0.3.0 → 3000).
+  2. Optionally add notes in `docs/release-notes/0.3.0.md`.
+  3. Commit, then run `git tag v0.3.0 && git push origin v0.3.0`.
+  4. `release.yml` checks the tag, runs the tests and lint, and builds per-ABI APKs **signed with the release key** (from the `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` secrets). It then verifies the signatures, writes `SHA256SUMS` and `update.json`, and **publishes** the release, which phones then pick up as an update.
 
-  If the repo secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` are set, the APKs are release-signed. Otherwise they're debug-signed. Keystores never go in git.
+  Without the signing secrets it only makes a debug-signed **draft**. Tags with a `-` (for example `v0.3.0-beta1`) always stay drafts.
+
+## 🧪 Real-download test matrix
+
+Results from [run 39579072259](../../actions/runs/39579072259) (21 Oct 2026, GitHub-hosted runner, so a datacenter IP). The [Real downloads](../../actions/workflows/real-downloads.yml) workflow refreshes this daily. The full table, with error details, is in each run's summary.
+
+| Source | App on emulator (yt-dlp 2026.10.10 nightly, self-updated) | Host, same yt-dlp | Host, yt-dlp 2025.11.12 (bundled in the APK) |
+|---|---|---|---|
+| YouTube, short (19 s) | 🚫 bot check | 🚫 bot check | 🚫 bot check |
+| YouTube, music video (3.5 min) | ✅ h264 480p | ✅ | ✅ |
+| TikTok | ✅ h264 | ❌ (flaky "unexpected response") | ✅ |
+| Vimeo | 🚫 login required | 🚫 login required | 🚫 login required |
+| Reddit | 🚫 login required | 🚫 login required | 🚫 login required |
+| X / Twitter | ✅ h264 | ✅ | ✅ |
+| Instagram | ✅ h264 | ✅ | 🚫 rate-limited |
+| Dailymotion | ✅ h264 | ✅ | ❌ |
+| Plain `.mp4` link | ✅ | ✅ | ✅ |
+
+- ✅ means the file was saved to MediaStore, is non-empty, and `ffprobe` found a valid MP4 with a duration.
+- 🚫 means the site refused the runner's IP or wanted a login. That isn't an app failure, and it's never counted as a pass.
+- ❌ is any other failure.
+
+The YouTube bot check is the datacenter IP being refused. The 403 from a real phone doesn't happen on runners, but the fix is the same: a current engine.
 
 ## 📚 Docs
 
 - [01 · Architecture](docs/01-architecture.md): packages, data flow, download engine, format mapping, storage, APK size
 - [02 · The share flow](docs/02-share-flow.md): ShareActivity, instant mode, finding the link in messy share text
-- [03 · Testing](docs/03-testing.md): unit tests and the emulator smoke test
+- [03 · Testing](docs/03-testing.md): unit tests, the emulator smoke test and the real-download matrix
 
 ## ⚖️ Use responsibly
 
