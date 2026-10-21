@@ -4,61 +4,51 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bentlybro.grabbit.AppGraph
 import com.bentlybro.grabbit.core.DownloadFormat
+import com.bentlybro.grabbit.data.EngineChannel
 import com.bentlybro.grabbit.data.ErrorText
 import com.bentlybro.grabbit.data.Settings
-import com.bentlybro.grabbit.engine.Engine
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.bentlybro.grabbit.engine.EngineUpdater
+import com.bentlybro.grabbit.update.UpdateUi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-data class EngineInfo(
-    val version: String? = null,
-    val updating: Boolean = false,
-    val message: String? = null,
-)
 
 class SettingsViewModel : ViewModel() {
     private val repo = AppGraph.settings
     private val engine = AppGraph.engine
+    private val engineUpdater = AppGraph.engineUpdater
+    private val appUpdater = AppGraph.appUpdater
 
     val settings: StateFlow<Settings> = repo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, Settings())
-
-    private val _engineInfo = MutableStateFlow(EngineInfo())
-    val engineInfo: StateFlow<EngineInfo> = _engineInfo.asStateFlow()
+    val engineVersion: StateFlow<String?> = engine.versionFlow
+    val engineStatus: StateFlow<EngineUpdater.Status> = engineUpdater.status
+    val appUpdate: StateFlow<UpdateUi> = appUpdater.ui
+    val updatesEnabled: Boolean get() = appUpdater.enabled
+    val updateRepo: String get() = appUpdater.repo
 
     init {
-        refreshVersion()
+        viewModelScope.launch { runCatching { engine.version() } }
     }
 
     fun setFormat(f: DownloadFormat) = viewModelScope.launch { repo.setDefaultFormat(f) }
     fun setInstant(v: Boolean) = viewModelScope.launch { repo.setInstantOnShare(v) }
     fun setClipboard(v: Boolean) = viewModelScope.launch { repo.setOfferClipboard(v) }
+    fun setAutoEngine(v: Boolean) = viewModelScope.launch { repo.setAutoUpdateEngine(v) }
 
-    private fun refreshVersion() = viewModelScope.launch {
-        val v = runCatching { engine.version() }.getOrNull()
-        _engineInfo.update { it.copy(version = v ?: "unknown") }
+    /** Switching channel installs that channel's latest straight away. */
+    fun setChannel(c: EngineChannel) = viewModelScope.launch {
+        if (settings.value.engineChannel == c) return@launch
+        repo.setEngineChannel(c)
+        updateEngine()
     }
 
-    fun updateYtDlp() {
-        if (_engineInfo.value.updating) return
-        _engineInfo.update { it.copy(updating = true, message = null) }
+    fun updateEngine() {
+        if (engineStatus.value.running) return
         viewModelScope.launch {
-            val result = runCatching { engine.updateYtDlp() }
-            val version = runCatching { engine.version() }.getOrNull()
-            _engineInfo.update {
-                it.copy(
-                    updating = false,
-                    version = version ?: it.version,
-                    message = result.fold(
-                        { r -> if (r == Engine.UpdateResult.UPDATED) "Updated to $version" else "Already up to date" },
-                        { e -> "Update failed: ${ErrorText.from(e.message)}" },
-                    ),
-                )
-            }
+            runCatching { engineUpdater.updateNow() }.onFailure { ErrorText.from(it.message) }
         }
     }
+
+    fun checkForAppUpdate() = viewModelScope.launch { appUpdater.checkNow() }
 }

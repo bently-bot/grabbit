@@ -13,10 +13,21 @@ kotlin {
 }
 
 /** Single source of truth for the version; the release workflow checks the tag against it. */
-val appVersionName = "0.1.0"
+val appVersionName = "0.2.0"
 
-/** CI can pass `-PversionCode=<run number>` so codes only ever go up. */
-val appVersionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
+/**
+ * Derived from the version name (0.2.0 -> 2000, 1.4.12 -> 1004012) so every build of a
+ * given version has the same code and codes only ever go up between releases. The in-app
+ * updater relies on that ordering.
+ */
+val appVersionCode = appVersionName.split(".").map { it.toInt() }
+    .let { (major, minor, patch) -> major * 1_000_000 + minor * 1_000 + patch }
+
+/**
+ * GitHub "owner/repo" whose Releases the in-app updater reads. Override with
+ * `-PupdateRepo=owner/repo` (or an empty string to switch OTA off) without touching code.
+ */
+val updateRepo = (project.findProperty("updateRepo") as String?) ?: "bently-bot/grabbit"
 
 android {
     namespace = "com.bentlybro.grabbit"
@@ -29,6 +40,7 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
+        buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
     }
 
     signingConfigs {
@@ -45,7 +57,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Debug builds are signed with a throwaway key, so they can't take release
+            // updates; skip the automatic check (the Settings button still works).
+            buildConfigField("Boolean", "AUTO_UPDATE_CHECK", "false")
+        }
         release {
+            buildConfigField("Boolean", "AUTO_UPDATE_CHECK", "true")
             // yt-dlp is driven over a process boundary and the library maps its JSON with
             // Jackson reflection, so shrinking buys little and risks a release-only crash.
             isMinifyEnabled = false

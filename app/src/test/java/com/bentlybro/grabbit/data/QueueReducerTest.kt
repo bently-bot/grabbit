@@ -114,4 +114,23 @@ class QueueReducerTest {
         assertEquals("https://youtu.be/a", item("a").displayTitle)
         assertEquals("T", item("a").copy(title = "T").displayTitle)
     }
+
+    @Test fun forbiddenMapsToFriendlyEngineHint() {
+        assertEquals(
+            ErrorText.FORBIDDEN,
+            ErrorText.from("ERROR: unable to download video data: HTTP Error 403: Forbidden"),
+        )
+        assertEquals(
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+            ErrorText.lastErrorLine("[youtube] x\nERROR: unable to download video data: HTTP Error 403: Forbidden\n"),
+        )
+    }
+
+    @Test fun failedKeepsRawDetail() {
+        val q = QueueReducer.failed(QueueReducer.started(listOf(item("a")), "a"), "a", "nice", "ERROR: raw")
+        assertEquals("ERROR: raw", q.single().errorDetail)
+        val r = QueueReducer.attempt(q, "a", 2, "2026.10.10")
+        assertEquals(2, r.single().autoRetries)
+        assertEquals("2026.10.10", r.single().engineVersion)
+    }
 }

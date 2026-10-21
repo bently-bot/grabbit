@@ -22,7 +22,7 @@ class FormatSelectorTest {
             val f = value(a, "-f")
             assertTrue(f.startsWith("bv*[height<=$h]+ba/b[height<=$h]"))
             assertTrue("$fmt must fall back for sites without heights", f.endsWith("/bv*+ba/b"))
-            assertEquals("res:$h,ext:mp4:m4a", value(a, "-S"))
+            assertEquals("res:$h,vcodec:h264,ext:mp4:m4a", value(a, "-S"))
             assertEquals("mp4", value(a, "--merge-output-format"))
         }
     }

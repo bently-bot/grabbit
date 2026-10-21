@@ -16,10 +16,13 @@ import com.bentlybro.grabbit.data.ErrorText
 import com.bentlybro.grabbit.data.QueueItem
 import com.bentlybro.grabbit.data.Status
 import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import android.util.Log
+import com.bentlybro.grabbit.core.FailureClassifier
+import com.bentlybro.grabbit.core.RetryPolicy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -59,8 +62,10 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             val scratch = File(applicationContext.cacheDir, "dl/$itemId")
             try {
                 AppGraph.engine.ensureReady()
+                // Cheap when fresh: only hits the network if the last check is >24h old.
+                AppGraph.engineUpdater.updateIfDue()
                 fillInfoIfMissing()
-                download(scratch)
+                downloadWithRecovery(scratch)
                 val output = pickOutput(scratch) ?: error("yt-dlp finished but produced no file")
                 queue.phase(itemId, Phase.SAVING)
                 updateNotification(Phase.SAVING, 100f, null)
@@ -85,7 +90,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     return@withPermit Result.success()
                 }
                 val message = ErrorText.from(t.message)
-                queue.failed(itemId, message)
+                queue.failed(itemId, message, ErrorText.lastErrorLine(t.message))
                 Notifications.failed(applicationContext, itemId, title(), message)
                 // Failures are shown with a Retry button; no automatic WorkManager retry.
                 Result.failure()
@@ -103,18 +108,46 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         }
     }
 
-    private suspend fun download(scratch: File) {
+    /**
+     * Runs yt-dlp, recovering from HTTP 403s per [RetryPolicy]: update the engine and retry,
+     * then (YouTube only) retry with alternate player clients. Other failures propagate.
+     */
+    private suspend fun downloadWithRecovery(scratch: File) {
+        val url = AppGraph.queue.get(itemId)?.url ?: return
+        var attempt = 0
+        var extractorArgs: String? = null
+        while (true) {
+            AppGraph.queue.attempt(itemId, attempt, AppGraph.engine.versionFlow.value)
+            try {
+                download(scratch, extractorArgs)
+                return
+            } catch (e: YoutubeDLException) {
+                if (isStopped || AppGraph.queue.get(itemId)?.status == Status.CANCELLED) throw e
+                val kind = FailureClassifier.classify(e.message)
+                val step = RetryPolicy.next(attempt, kind, RetryPolicy.isYouTube(url)) ?: throw e
+                Log.w(TAG, "attempt $attempt failed ($kind); retrying with $step")
+                queue().phase(itemId, Phase.STARTING)
+                if (step.updateEngine) runCatching { AppGraph.engineUpdater.updateNow() }
+                extractorArgs = step.extractorArgs
+                attempt++
+            }
+        }
+    }
+
+    private fun queue() = AppGraph.queue
+
+    private suspend fun download(scratch: File, extractorArgs: String?) {
         val item = AppGraph.queue.get(itemId) ?: return
         scratch.deleteRecursively()
         scratch.mkdirs()
         val template = File(scratch, "%(title).80B [%(id)s].%(ext)s").absolutePath
         val request = YoutubeDLRequest(item.url)
         request.addCommands(FormatSelector.common(template) + FormatSelector.args(item.format))
+        extractorArgs?.let { request.addOption("--extractor-args", it) }
         var lastUi = 0L
         var lastNotify = 0L
         var phase = Phase.STARTING
-        runInterruptible(Dispatchers.IO) {
-            YoutubeDL.execute(request, itemId) { rawPercent, rawEta, line ->
+        AppGraph.engine.execute(request, itemId) { rawPercent, rawEta, line ->
                 ProgressParser.phaseOf(line)?.let { phase = it }
                 val percent = ProgressParser.percent(rawPercent)
                 val eta = ProgressParser.eta(rawEta)
@@ -127,7 +160,6 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     lastNotify = now
                     updateNotificationBlocking(phase, percent, eta)
                 }
-            }
         }
     }
 

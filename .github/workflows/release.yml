@@ -1,7 +1,12 @@
 name: Release
 
-# Push a tag like v0.1.0 to build the APKs and open a DRAFT release with them attached.
-# Nothing is public until the draft is published by hand.
+# Push a tag like v0.2.0 to build per-ABI APKs and create a GitHub release with them, a
+# SHA256SUMS file and update.json (what the in-app updater reads).
+#
+#  - Signing secrets present (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD):
+#    release-signed APKs, and the release is PUBLISHED so phones can update to it.
+#  - No secrets: debug-signed APKs in a DRAFT only (they could never update a release install).
+#  - Tags with a "-" (v0.3.0-beta1) always stay drafts.
 on:
   push:
     tags: ['v*']
@@ -15,11 +20,11 @@ concurrency:
 
 jobs:
   release:
-    name: Build and draft release
+    name: Build and release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write   # to create the draft release
+      contents: write   # to create the release
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,17 +43,17 @@ jobs:
         run: |
           name=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
           tag="${GITHUB_REF_NAME#v}"
-          if [ "$name" != "$tag" ]; then
+          if [ "${tag%%-*}" != "$name" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match appVersionName $name in app/build.gradle.kts"
             exit 1
           fi
+          IFS=. read -r ma mi pa <<<"$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$(( ma * 1000000 + mi * 1000 + pa ))" >> "$GITHUB_OUTPUT"
 
-      - name: Tests
-        run: ./gradlew testDebugUnitTest --no-daemon
+      - name: Tests and lint
+        run: ./gradlew testDebugUnitTest lintRelease --no-daemon
 
-      # Signed release APKs when the signing secrets exist; otherwise debug-signed APKs so
-      # a draft can still be produced (and installed) before a release key is set up.
       - name: Build APKs
         id: build
         env:
@@ -61,26 +66,63 @@ jobs:
           if [ -n "$KEYSTORE_BASE64" ]; then
             export KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
             echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_FILE"
-            ./gradlew assembleRelease -PversionCode=${{ github.run_number }} --no-daemon
+            ./gradlew assembleRelease --no-daemon
             variant=release
+            echo "signed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::No signing secrets; attaching debug-signed APKs."
-            ./gradlew assembleDebug -PversionCode=${{ github.run_number }} --no-daemon
+            echo "::warning::No signing secrets; drafting debug-signed APKs (OTA can't use these)."
+            ./gradlew assembleDebug --no-daemon
             variant=debug
+            echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
+          rm -f "$RUNNER_TEMP/release.jks"
           for apk in app/build/outputs/apk/$variant/*.apk; do
-            abi=$(basename "$apk" | sed -E "s/app-(.*)-$variant\.apk/\1/")
+            abi=$(basename "$apk" | sed -E "s/app-(.*)-$variant(-unsigned)?\.apk/\1/")
             cp "$apk" "dist/grabbit-${{ steps.version.outputs.name }}-$abi.apk"
           done
           ls -l dist
-          rm -f "$RUNNER_TEMP/release.jks"
 
-      - name: Draft the release
+      - name: Verify signatures, checksums and update manifest
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          {
+            echo "### APKs"
+            echo
+            echo "| APK | Size | Signer cert SHA-256 |"
+            echo "|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for apk in dist/*.apk; do
+            "$apksigner" verify "$apk"
+            cert=$("$apksigner" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+            mb=$(awk -v b="$(stat -c %s "$apk")" 'BEGIN { printf "%.1f", b / 1048576 }')
+            echo "| \`$(basename "$apk")\` | $mb MB | \`$cert\` |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          printf '{"versionName":"%s","versionCode":%s,"minSdk":29}\n' \
+            "${{ steps.version.outputs.name }}" "${{ steps.version.outputs.code }}" > dist/update.json
+          (cd dist && sha256sum *.apk update.json > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Release notes
+        run: |
+          notes="docs/release-notes/${{ steps.version.outputs.name }}.md"
+          if [ -f "$notes" ]; then cp "$notes" notes.md; else echo "Grabbit ${{ steps.version.outputs.name }}" > notes.md; fi
+          {
+            echo
+            echo "---"
+            echo "Install: download the APK for your phone (almost always \`arm64-v8a\`). Checksums are in \`SHA256SUMS\`."
+          } >> notes.md
+
+      - name: Create the release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          draft: true
+          draft: ${{ steps.build.outputs.signed != 'true' || contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ steps.build.outputs.signed == 'true' && !contains(github.ref_name, '-') }}
           tag_name: ${{ github.ref_name }}
           name: Grabbit ${{ steps.version.outputs.name }}
-          files: dist/*.apk
+          body_path: notes.md
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS
+            dist/update.json
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -47,7 +47,9 @@ object FormatSelector {
         } else {
             "bv*[height<=$maxHeight]+ba/b[height<=$maxHeight]/bv*+ba/b"
         }
-        val sort = if (maxHeight == null) "res,ext:mp4:m4a" else "res:$maxHeight,ext:mp4:m4a"
+        // Within a resolution prefer H.264: YouTube now serves AV1 first, and plenty of
+        // phones (anything without an AV1 hardware decoder) stutter or refuse to play it.
+        val sort = if (maxHeight == null) "res,vcodec:h264,ext:mp4:m4a" else "res:$maxHeight,vcodec:h264,ext:mp4:m4a"
         return listOf(
             "-f", selector,
             "-S", sort,
@@ -61,6 +63,10 @@ object FormatSelector {
         "--no-playlist",
         "--no-mtime",
         "--newline",
+        // Mobile networks drop out; retry transient errors instead of failing the item.
+        "--retries", "5",
+        "--fragment-retries", "5",
+        "--extractor-retries", "3",
         "-o", outputTemplate,
     )
 }

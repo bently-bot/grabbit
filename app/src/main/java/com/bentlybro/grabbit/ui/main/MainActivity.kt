@@ -19,6 +19,12 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bentlybro.grabbit.AppGraph
 import com.bentlybro.grabbit.download.Notifications
+import com.bentlybro.grabbit.ui.UpdateDialog
+import com.bentlybro.grabbit.update.UpdateUi
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.bentlybro.grabbit.ui.settings.SettingsScreen
 import com.bentlybro.grabbit.ui.settings.SettingsViewModel
 import com.bentlybro.grabbit.ui.theme.GrabbitTheme
@@ -42,8 +48,26 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        if (savedInstanceState == null) lifecycleScope.launch { AppGraph.appUpdater.autoCheck() }
+
         setContent {
             GrabbitTheme {
+                val updater = AppGraph.appUpdater
+                val update by updater.ui.collectAsStateWithLifecycle()
+                val scope = rememberCoroutineScope()
+                UpdateDialog(
+                    state = update,
+                    onDownload = { (update as? UpdateUi.Available)?.let { scope.launch { updater.download(it.update) } } },
+                    onInstall = {
+                        (update as? UpdateUi.ReadyToInstall)?.let {
+                            runCatching { startActivity(updater.installIntent(it.apk)) }
+                            updater.dismiss()
+                        }
+                    },
+                    onGrantPermission = { runCatching { startActivity(updater.installPermissionIntent()) } },
+                    onSkip = { v -> scope.launch { updater.skip(v) } },
+                    onDismiss = updater::dismiss,
+                )
                 var showSettings by rememberSaveable { mutableStateOf(false) }
                 BackHandler(enabled = showSettings) { showSettings = false }
                 AnimatedContent(targetState = showSettings, label = "screen") { settings ->
@@ -55,6 +79,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from "Install unknown apps"? Move straight on to the install prompt.
+        AppGraph.appUpdater.recheckPermission()
     }
 
     override fun onNewIntent(intent: Intent) {

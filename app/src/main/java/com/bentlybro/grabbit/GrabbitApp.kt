@@ -16,9 +16,14 @@ class GrabbitApp : Application() {
         AppGraph.init(this)
         Notifications.createChannels(this)
         scope.launch {
-            // Unpack Python/yt-dlp early so the first preview isn't also the slowest.
+            // Unpack Python/yt-dlp early so the first preview isn't also the slowest, then
+            // bring yt-dlp up to date: the copy bundled in the APK is months old by the time
+            // anyone installs it, and YouTube in particular rejects stale clients (HTTP 403).
             runCatching { AppGraph.engine.ensureReady() }
+            runCatching { AppGraph.engine.version() }
+            AppGraph.engineUpdater.updateIfDue()
         }
+        AppGraph.engineUpdater.schedulePeriodic()
         scope.launch(Dispatchers.IO) { AppGraph.scheduler.reconcile() }
     }
 }

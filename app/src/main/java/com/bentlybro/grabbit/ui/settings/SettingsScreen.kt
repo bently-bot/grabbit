@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,13 +34,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bentlybro.grabbit.BuildConfig
+import com.bentlybro.grabbit.data.EngineChannel
 import com.bentlybro.grabbit.ui.components.FormatChips
+import com.bentlybro.grabbit.update.UpdateUi
+import android.text.format.DateUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: SettingsViewModel, onBack: () -> Unit) {
     val s by vm.settings.collectAsStateWithLifecycle()
-    val engine by vm.engineInfo.collectAsStateWithLifecycle()
+    val engineVersion by vm.engineVersion.collectAsStateWithLifecycle()
+    val engineStatus by vm.engineStatus.collectAsStateWithLifecycle()
+    val appUpdate by vm.appUpdate.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -68,21 +74,76 @@ fun SettingsScreen(vm: SettingsViewModel, onBack: () -> Unit) {
                 "When you open Grabbit with a link copied, offer to use it.",
                 s.offerClipboard, vm::setClipboard,
             )
-            Section("yt-dlp", "Sites change all the time. If downloads start failing, update first.") {
+            Section(
+                "Download engine (yt-dlp)",
+                "Sites change all the time, YouTube especially. Grabbit updates the engine on first launch, " +
+                    "daily, and automatically when a download is refused (HTTP 403).",
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Version", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(engine.version ?: "Checking…", style = MaterialTheme.typography.titleMedium)
+                        Text(engineVersion ?: "Checking…", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (s.lastEngineCheck > 0) "Checked ${ago(s.lastEngineCheck)}" else "Not checked yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Button(onClick = vm::updateYtDlp, enabled = !engine.updating) {
-                        if (engine.updating) {
+                    Button(onClick = vm::updateEngine, enabled = !engineStatus.running) {
+                        if (engineStatus.running) {
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                             Spacer(Modifier.width(8.dp))
                         }
-                        Text(if (engine.updating) "Updating…" else "Update yt-dlp")
+                        Text(if (engineStatus.running) "Updating…" else "Update engine now")
                     }
                 }
-                engine.message?.let {
+                engineStatus.lastMessage?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Channel", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EngineChannel.entries.forEach { c ->
+                        FilterChip(
+                            selected = s.engineChannel == c,
+                            onClick = { vm.setChannel(c) },
+                            label = { Text(c.label) },
+                        )
+                    }
+                }
+                Text(
+                    "Nightly gets site fixes first and is what yt-dlp suggests when YouTube breaks. Stable changes less often.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Update automatically", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = s.autoUpdateEngine, onCheckedChange = vm::setAutoEngine)
+                }
+            }
+            Section("App updates", if (vm.updatesEnabled) "From github.com/${vm.updateRepo} releases." else "Switched off in this build.") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Installed", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(BuildConfig.VERSION_NAME, style = MaterialTheme.typography.titleMedium)
+                    }
+                    val checking = appUpdate is UpdateUi.Checking || appUpdate is UpdateUi.Downloading
+                    Button(onClick = vm::checkForAppUpdate, enabled = vm.updatesEnabled && !checking) {
+                        if (checking) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text("Check for updates")
+                    }
+                }
+                val line = when (val u = appUpdate) {
+                    is UpdateUi.UpToDate -> "You're on the latest version (${u.version})."
+                    is UpdateUi.Failed -> u.message
+                    else -> null
+                }
+                line?.let {
                     Spacer(Modifier.height(8.dp))
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                 }
@@ -132,3 +193,6 @@ private fun ToggleSection(title: String, subtitle: String, checked: Boolean, onC
         }
     }
 }
+
+private fun ago(ms: Long): String =
+    DateUtils.getRelativeTimeSpanString(ms, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString().lowercase()

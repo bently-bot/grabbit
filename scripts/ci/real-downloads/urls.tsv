@@ -1,0 +1,11 @@
+# platform	url	notes
+# Short, long-lived public videos. Mostly yt-dlp's own extractor test cases.
+youtube	https://www.youtube.com/watch?v=jNQXAC9IVRw	"Me at the zoo", 19 s
+youtube-music-video	https://www.youtube.com/watch?v=dQw4w9WgXcQ	3.5 min, the kind of video that 403'd on v0.1.0
+tiktok	https://www.tiktok.com/@scout2015/video/6718335390845095173	yt-dlp test case
+vimeo	https://vimeo.com/56015672	yt-dlp test video
+reddit	https://www.reddit.com/r/videos/comments/6rrwyj/that_small_heart_attack/	yt-dlp test case
+x	https://twitter.com/captainamerica/status/719944021058060289	yt-dlp test case
+instagram	https://www.instagram.com/p/aye83DjauH/	yt-dlp test case
+dailymotion	https://www.dailymotion.com/video/x5kesuj	yt-dlp test case
+direct-mp4	https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4	Big Buck Bunny (CC BY 3.0), 10 s

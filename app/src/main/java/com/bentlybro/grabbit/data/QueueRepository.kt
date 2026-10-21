@@ -40,7 +40,9 @@ class QueueRepository(context: Context) {
     fun info(id: String, title: String?, uploader: String?, thumb: String?, duration: Long?) =
         mutate { QueueReducer.info(it, id, title, uploader, thumb, duration) }
     fun done(id: String, uri: String, name: String, mime: String) = mutate { QueueReducer.done(it, id, uri, name, mime) }
-    fun failed(id: String, error: String) = mutate { QueueReducer.failed(it, id, error) }
+    fun failed(id: String, error: String, detail: String? = null) = mutate { QueueReducer.failed(it, id, error, detail) }
+    fun attempt(id: String, retries: Int, engineVersion: String?) =
+        mutate { QueueReducer.attempt(it, id, retries, engineVersion) }
     fun cancelled(id: String) = mutate { QueueReducer.cancelled(it, id) }
     fun retried(id: String, workId: String) = mutate { QueueReducer.retried(it, id, workId) }
     fun remove(id: String) = mutate { QueueReducer.remove(it, id) }
